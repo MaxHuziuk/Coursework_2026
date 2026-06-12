@@ -33,23 +33,25 @@ def get_created_impressions_data(db: Session, user_id: int) -> list:
 
 def get_available_impressions_data(db: Session, user_id: int) -> list:
     paid = db.query(Impression).join(Purchase, Purchase.impression_id == Impression.id).filter(
-        Purchase.user_id == user_id, Purchase.status == 'success', Impression.active == True).all()
+        Purchase.user_id == user_id, Purchase.status == 'success', Impression.active == True,
+        Impression.published == True).all()
     saved = db.query(Impression).join(SavedImpression, SavedImpression.impression_id == Impression.id).filter(
-        SavedImpression.user_id == user_id, Impression.active == True).all()
+        SavedImpression.user_id == user_id, Impression.active == True, Impression.published == True).all()
     unique = {item.id: item for item in paid + saved}
     return [get_impression_summary(item) for item in unique.values()]
 
 
 def get_purchased_impressions_data(db: Session, user_id: int) -> list:
     impressions = db.query(Impression).join(Purchase, Purchase.impression_id == Impression.id).filter(
-        Purchase.user_id == user_id, Purchase.status == 'success', Impression.active == True).order_by(
+        Purchase.user_id == user_id, Purchase.status == 'success', Impression.active == True,
+        Impression.published == True).order_by(
         Purchase.created_at.desc()).all()
     return [get_impression_summary(item) for item in impressions]
 
 
 def get_saved_impressions_data(db: Session, user_id: int) -> list:
     impressions = db.query(Impression).join(SavedImpression, SavedImpression.impression_id == Impression.id).filter(
-        SavedImpression.user_id == user_id, Impression.active == True).order_by(
+        SavedImpression.user_id == user_id, Impression.active == True, Impression.published == True).order_by(
         SavedImpression.saved_at.desc()).all()
     return [get_impression_summary(item) for item in impressions]
 
@@ -65,9 +67,9 @@ def get_recommendations_data(db: Session, user_id: int) -> list:
         action.object_id for action in user.actions if action.object_type == 'impression']
     recent.reverse()
 
-    result = db.query(Impression).filter(Impression.active == True,
+    result = db.query(Impression).filter(Impression.active == True, Impression.published == True,
                                          Impression.id.notin_(excluded), Impression.id.in_(recent)).all()
-    result += db.query(Impression).filter(Impression.active == True,
+    result += db.query(Impression).filter(Impression.active == True, Impression.published == True,
                                           Impression.id.notin_(excluded), Impression.id.notin_(recent)).order_by(Impression.created_at.desc()).all()
 
     return [get_impression_summary(item) for item in result]

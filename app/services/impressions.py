@@ -29,8 +29,8 @@ def validate_price(is_paid: bool, cost: Optional[float]):
 
 def get_impression_summary(impression: Impression) -> dict:
     return {'id': impression.id, 'title': impression.title, 'description': impression.description,
-            'is_paid': impression.is_paid, 'cost': impression.cost, 'created_at': impression.created_at,
-            'updated_at': impression.updated_at}
+            'is_paid': impression.is_paid, 'cost': impression.cost, 'published': impression.published,
+            'created_at': impression.created_at, 'updated_at': impression.updated_at}
 
 
 def get_impression_detail(impression: Impression) -> dict:
@@ -103,7 +103,8 @@ def apply_impression_sort(query, sort_by: str, order: str):
 def get_catalog_data(db: Session, is_paid: Optional[bool] = None, min_cost: Optional[float] = None,
                      max_cost: Optional[float] = None, search: Optional[str] = None,
                      sort_by: str = 'created_at', order: str = 'desc') -> list:
-    query = db.query(Impression).filter(Impression.active == True)
+    query = db.query(Impression).filter(
+        Impression.active == True, Impression.published == True)
     query = apply_impression_filters(query, is_paid, min_cost, max_cost, search)
     query = apply_impression_sort(query, sort_by, order)
     impressions = query.all()
@@ -116,4 +117,5 @@ def get_admin_impressions_data(db: Session) -> list:
         **get_impression_summary(item),
         'owner_id': item.owner_id,
         'active': item.active,
+        'published': item.published,
     } for item in impressions]

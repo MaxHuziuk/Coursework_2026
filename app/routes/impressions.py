@@ -55,6 +55,8 @@ def create_impression(data: ImpressionCreate, current_user: User = Depends(get_u
 @router.get('/{impression_id}')
 def get_impression(impression_id: int, current_user: User = Depends(get_user), db: Session = Depends(get_db)):
     impression = get_impression_by_id(db, impression_id)
+    if not impression.published and impression.owner_id != current_user.id:
+        raise AppError(404, 'Impression not found')
     log_action(db, current_user, 'view_impression',
                'impression', impression.id)
     return app_response(get_impression_detail(impression))
@@ -96,15 +98,44 @@ def delete_impression(impression_id: int, current_user: User = Depends(get_user)
     impression = get_impression_by_id(db, impression_id)
     check_owner(impression.owner_id, current_user)
     impression.active = False
+    impression.published = False
+    db.query(SavedImpression).filter(
+        SavedImpression.impression_id == impression.id).delete()
     db.commit()
     log_action(db, current_user, 'delete_impression',
                'impression', impression.id)
     return app_response({'id': impression.id})
 
 
+@router.patch('/{impression_id}/publish')
+def publish_impression(impression_id: int, current_user: User = Depends(get_user),
+                       db: Session = Depends(get_db)):
+    impression = get_impression_by_id(db, impression_id)
+    check_owner(impression.owner_id, current_user)
+    impression.published = True
+    db.commit()
+    log_action(db, current_user, 'publish_impression',
+               'impression', impression.id)
+    return app_response({'id': impression.id, 'published': impression.published})
+
+
+@router.patch('/{impression_id}/unpublish')
+def unpublish_impression(impression_id: int, current_user: User = Depends(get_user),
+                         db: Session = Depends(get_db)):
+    impression = get_impression_by_id(db, impression_id)
+    check_owner(impression.owner_id, current_user)
+    impression.published = False
+    db.commit()
+    log_action(db, current_user, 'unpublish_impression',
+               'impression', impression.id)
+    return app_response({'id': impression.id, 'published': impression.published})
+
+
 @router.post('/{impression_id}/buy')
 def buy_impression(impression_id: int, current_user: User = Depends(get_user), db: Session = Depends(get_db)):
     impression = get_impression_by_id(db, impression_id)
+    if not impression.published:
+        raise AppError(400, 'Impression is not published')
     if not impression.is_paid:
         raise AppError(400, 'Impression is not paid')
     existing = db.query(Purchase).filter(Purchase.user_id == current_user.id, Purchase.impression_id == impression_id,
@@ -126,6 +157,8 @@ def buy_impression(impression_id: int, current_user: User = Depends(get_user), d
 @router.post('/{impression_id}/save')
 def save_impression(impression_id: int, current_user: User = Depends(get_user), db: Session = Depends(get_db)):
     impression = get_impression_by_id(db, impression_id)
+    if not impression.published:
+        raise AppError(400, 'Impression is not published')
     existing = db.query(SavedImpression).filter(SavedImpression.user_id == current_user.id,
                                                 SavedImpression.impression_id == impression_id).first()
     if existing:
@@ -146,7 +179,6 @@ def save_impression(impression_id: int, current_user: User = Depends(get_user), 
 @router.delete('/{impression_id}/save')
 def delete_saved_impression(impression_id: int, current_user: User = Depends(get_user),
                             db: Session = Depends(get_db)):
-    impression = get_impression_by_id(db, impression_id)
     saved = db.query(SavedImpression).filter(SavedImpression.user_id == current_user.id,
                                              SavedImpression.impression_id == impression_id).first()
     if not saved:
@@ -154,5 +186,5 @@ def delete_saved_impression(impression_id: int, current_user: User = Depends(get
     db.delete(saved)
     db.commit()
     log_action(db, current_user, 'delete_saved_impression',
-               'impression', impression.id)
-    return app_response({'impression_id': impression.id})
+               'impression', impression_id)
+    return app_response({'impression_id': impression_id})

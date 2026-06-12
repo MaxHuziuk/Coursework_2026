@@ -14,6 +14,8 @@ class Impression(Base):
         Boolean, default=False, nullable=False)
     cost: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    published: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False)
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[DateTime] = mapped_column(
