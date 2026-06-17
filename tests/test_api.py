@@ -6,8 +6,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.database import Base, get_db
+from app.models import User
 from app.responses import setup_exception_handlers
 from app.routes import admin, auth, impressions, user
+from app.security import get_password_hash
 
 
 @pytest.fixture()
@@ -21,6 +23,7 @@ def client():
     Base.metadata.create_all(bind=engine)
 
     test_app = FastAPI()
+    test_app.state.test_session = test_session
     setup_exception_handlers(test_app)
     test_app.include_router(auth.router)
     test_app.include_router(user.router)
@@ -80,10 +83,31 @@ def impression_data(title='City route', description='Small route description', i
 
 
 def create_impression(client, headers, title='City route', description='Small route description',
-                      is_paid=False, cost=0):
-    response = client.post('/impressions', json=impression_data(title, description, is_paid, cost), headers=headers)
+                      is_paid=False, cost=0, points=None):
+    response = client.post('/impressions', json=impression_data(title, description, is_paid, cost, points),
+                           headers=headers)
     assert response.status_code == 200
     return response.json()['data']['id']
+
+
+def get_admin_headers(client):
+    db = client.app.state.test_session()
+    admin = User(email='admin@example.com', password_hash=get_password_hash('123456'), role='admin',
+                 status='active', name='Admin')
+    db.add(admin)
+    db.commit()
+    db.close()
+    return login_headers(client, 'admin@example.com', '123456')
+
+
+def login_headers(client, email, password):
+    response = client.post('/auth/login', json={
+        'email': email,
+        'password': password,
+    })
+    assert response.status_code == 200
+    token = response.json()['data']['token']
+    return {'Authorization': f'Bearer {token}'}
 
 
 def test_user_can_register_login_and_open_profile(client):
@@ -345,3 +369,274 @@ def test_deleted_impression_is_removed_from_saved(client):
     assert response.status_code == 200
     assert client.get('/user/saved-impressions', headers=visitor).json()['data'] == []
     assert client.get(f'/impressions/{impression_id}', headers=visitor).status_code == 404
+
+
+def test_login_rejects_wrong_password(client):
+    get_headers(client)
+
+    response = client.post('/auth/login', json={
+        'email': 'user@example.com',
+        'password': 'wrong-password',
+    })
+
+    assert response.status_code == 401
+    assert response.json()['error']['message'] == 'Invalid email or password'
+
+
+def test_impression_detail_returns_route_points_in_order(client):
+    owner = get_headers(client)
+    points = [
+        {
+            'title': 'Finish',
+            'description': 'Second point',
+            'location_text': 'Park',
+            'latitude': 55.76,
+            'longitude': 37.62,
+            'order_index': 2,
+        },
+        {
+            'title': 'Start',
+            'description': 'First point',
+            'location_text': 'Square',
+            'latitude': 55.75,
+            'longitude': 37.61,
+            'order_index': 1,
+        },
+    ]
+    impression_id = create_impression(client, owner, points=points)
+    client.patch(f'/impressions/{impression_id}/publish', headers=owner)
+
+    response = client.get(f'/impressions/{impression_id}', headers=owner)
+
+    assert response.status_code == 200
+    data = response.json()['data']
+    assert data['id'] == impression_id
+    assert [point['order_index'] for point in data['points']] == [1, 2]
+    assert [point['title'] for point in data['points']] == ['Start', 'Finish']
+
+
+def test_owner_can_update_impression_and_replace_route_points(client):
+    owner = get_headers(client)
+    impression_id = create_impression(client, owner)
+    new_points = [
+        {
+            'title': 'Museum',
+            'description': 'Updated point',
+            'location_text': 'Museum street',
+            'latitude': 55.70,
+            'longitude': 37.50,
+            'order_index': 1,
+        },
+        {
+            'title': 'Cafe',
+            'description': 'Final point',
+            'location_text': 'Cafe place',
+            'latitude': 55.71,
+            'longitude': 37.51,
+            'order_index': 2,
+        },
+    ]
+
+    update_response = client.put(f'/impressions/{impression_id}', json={
+        'title': 'Updated route',
+        'description': 'Updated description',
+        'points': new_points,
+    }, headers=owner)
+    detail_response = client.get(f'/impressions/{impression_id}', headers=owner)
+
+    assert update_response.status_code == 200
+    data = detail_response.json()['data']
+    assert data['title'] == 'Updated route'
+    assert data['description'] == 'Updated description'
+    assert [point['title'] for point in data['points']] == ['Museum', 'Cafe']
+
+
+def test_update_rejects_duplicate_route_point_order(client):
+    owner = get_headers(client)
+    impression_id = create_impression(client, owner)
+
+    response = client.put(f'/impressions/{impression_id}', json={
+        'points': [
+            {
+                'title': 'One',
+                'description': 'Point one',
+                'location_text': 'Place one',
+                'order_index': 1,
+            },
+            {
+                'title': 'Two',
+                'description': 'Point two',
+                'location_text': 'Place two',
+                'order_index': 1,
+            },
+        ],
+    }, headers=owner)
+
+    assert response.status_code == 422
+    assert 'Route point order must be unique' in response.json()['error']['message']
+
+
+def test_created_saved_purchased_and_available_lists(client):
+    owner = get_headers(client, 'owner@example.com', name='Owner')
+    user_headers = get_headers(client, 'reader@example.com', name='Reader')
+    free_id = create_impression(client, owner, title='Free route')
+    paid_id = create_impression(client, owner, title='Paid route', is_paid=True, cost=75)
+    client.patch(f'/impressions/{free_id}/publish', headers=owner)
+    client.patch(f'/impressions/{paid_id}/publish', headers=owner)
+    client.post(f'/impressions/{free_id}/save', headers=user_headers)
+    client.post(f'/impressions/{paid_id}/buy', headers=user_headers)
+
+    created = client.get('/user/created-impressions', headers=owner).json()['data']
+    saved = client.get('/user/saved-impressions', headers=user_headers).json()['data']
+    purchased = client.get('/user/purchased-impressions', headers=user_headers).json()['data']
+    available = client.get('/user/impressions', headers=user_headers).json()['data']
+
+    assert {item['id'] for item in created} == {free_id, paid_id}
+    assert [item['id'] for item in saved] == [free_id]
+    assert [item['id'] for item in purchased] == [paid_id]
+    assert {item['id'] for item in available} == {free_id, paid_id}
+
+
+def test_user_can_remove_saved_impression_after_it_was_unpublished(client):
+    owner = get_headers(client, 'owner@example.com', name='Owner')
+    visitor = get_headers(client, 'visitor@example.com', name='Visitor')
+    impression_id = create_impression(client, owner)
+    client.patch(f'/impressions/{impression_id}/publish', headers=owner)
+    client.post(f'/impressions/{impression_id}/save', headers=visitor)
+    client.patch(f'/impressions/{impression_id}/unpublish', headers=owner)
+
+    response = client.delete(f'/impressions/{impression_id}/save', headers=visitor)
+
+    assert response.status_code == 200
+    assert response.json()['data']['impression_id'] == impression_id
+
+
+def test_recommendations_use_actions_and_exclude_unavailable_items(client):
+    owner = get_headers(client, 'owner@example.com', name='Owner')
+    user_headers = get_headers(client, 'reader@example.com', name='Reader')
+    viewed_id = create_impression(client, owner, title='Viewed route')
+    saved_id = create_impression(client, owner, title='Saved route')
+    paid_id = create_impression(client, owner, title='Paid route', is_paid=True, cost=60)
+    hidden_id = create_impression(client, owner, title='Hidden route')
+    own_id = create_impression(client, user_headers, title='Own route')
+
+    for impression_id in [viewed_id, saved_id, paid_id, own_id]:
+        client.patch(f'/impressions/{impression_id}/publish', headers=owner if impression_id != own_id else user_headers)
+
+    client.get(f'/impressions/{viewed_id}', headers=user_headers)
+    client.post(f'/impressions/{saved_id}/save', headers=user_headers)
+    client.post(f'/impressions/{paid_id}/buy', headers=user_headers)
+
+    response = client.get('/user/recommendations', headers=user_headers)
+
+    assert response.status_code == 200
+    ids = {item['id'] for item in response.json()['data']}
+    assert viewed_id in ids
+    assert saved_id not in ids
+    assert paid_id not in ids
+    assert hidden_id not in ids
+    assert own_id not in ids
+
+
+def test_user_actions_history_contains_main_operations(client):
+    headers = get_headers(client)
+    impression_id = create_impression(client, headers)
+    client.patch(f'/impressions/{impression_id}/publish', headers=headers)
+    client.get(f'/impressions/{impression_id}', headers=headers)
+
+    response = client.get('/user/actions', headers=headers)
+
+    assert response.status_code == 200
+    action_types = {item['action_type'] for item in response.json()['data']}
+    assert {'register', 'login', 'create_impression', 'publish_impression', 'view_impression'} <= action_types
+
+
+def test_non_admin_cannot_open_admin_routes(client):
+    headers = get_headers(client)
+
+    response = client.get('/admin/users', headers=headers)
+
+    assert response.status_code == 403
+    assert response.json()['error']['message'] == 'Admin access required'
+
+
+def test_admin_can_list_users_and_change_user_status(client):
+    user_headers = get_headers(client, 'target@example.com', name='Target')
+    admin_headers = get_admin_headers(client)
+    users = client.get('/admin/users', headers=admin_headers).json()['data']
+    target_id = next(item['id'] for item in users if item['email'] == 'target@example.com')
+
+    block_response = client.patch(f'/admin/users/{target_id}/status', json={'status': 'blocked'},
+                                  headers=admin_headers)
+    blocked_profile = client.get('/user/profile', headers=user_headers)
+    activate_response = client.patch(f'/admin/users/{target_id}/status', json={'status': 'active'},
+                                     headers=admin_headers)
+    active_profile = client.get('/user/profile', headers=user_headers)
+
+    assert block_response.status_code == 200
+    assert block_response.json()['data']['status'] == 'blocked'
+    assert blocked_profile.status_code == 401
+    assert activate_response.status_code == 200
+    assert active_profile.status_code == 200
+
+
+def test_admin_cannot_block_himself(client):
+    admin_headers = get_admin_headers(client)
+    admin_profile = client.get('/user/profile', headers=admin_headers).json()['data']
+
+    response = client.patch(f'/admin/users/{admin_profile["id"]}/status', json={'status': 'blocked'},
+                            headers=admin_headers)
+
+    assert response.status_code == 400
+    assert response.json()['error']['message'] == 'Admin cannot block himself'
+
+
+def test_admin_can_view_all_actions_and_user_actions(client):
+    user_headers = get_headers(client, 'target@example.com', name='Target')
+    admin_headers = get_admin_headers(client)
+    impression_id = create_impression(client, user_headers)
+    client.patch(f'/impressions/{impression_id}/publish', headers=user_headers)
+    users = client.get('/admin/users', headers=admin_headers).json()['data']
+    target_id = next(item['id'] for item in users if item['email'] == 'target@example.com')
+
+    all_actions = client.get('/admin/actions', headers=admin_headers)
+    user_actions = client.get(f'/admin/users/{target_id}/actions', headers=admin_headers)
+
+    assert all_actions.status_code == 200
+    assert user_actions.status_code == 200
+    assert len(all_actions.json()['data']) >= len(user_actions.json()['data'])
+    assert 'create_impression' in {item['action_type'] for item in user_actions.json()['data']}
+
+
+def test_admin_can_change_impression_activity(client):
+    owner = get_headers(client, 'owner@example.com', name='Owner')
+    visitor = get_headers(client, 'visitor@example.com', name='Visitor')
+    admin_headers = get_admin_headers(client)
+    impression_id = create_impression(client, owner)
+    client.patch(f'/impressions/{impression_id}/publish', headers=owner)
+
+    hide_response = client.patch(f'/admin/impressions/{impression_id}/active?active=false',
+                                 headers=admin_headers)
+    hidden_catalog = client.get('/impressions', headers=visitor)
+    restore_response = client.patch(f'/admin/impressions/{impression_id}/active?active=true',
+                                    headers=admin_headers)
+    visible_catalog = client.get('/impressions', headers=visitor)
+
+    assert hide_response.status_code == 200
+    assert hidden_catalog.json()['data'] == []
+    assert restore_response.status_code == 200
+    assert [item['id'] for item in visible_catalog.json()['data']] == [impression_id]
+
+
+def test_admin_impressions_include_active_and_published_statuses(client):
+    owner = get_headers(client, 'owner@example.com', name='Owner')
+    admin_headers = get_admin_headers(client)
+    impression_id = create_impression(client, owner)
+
+    response = client.get('/admin/impressions', headers=admin_headers)
+
+    assert response.status_code == 200
+    item = next(item for item in response.json()['data'] if item['id'] == impression_id)
+    assert item['active'] is True
+    assert item['published'] is False
+    assert item['owner_id'] > 0
