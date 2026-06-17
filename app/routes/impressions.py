@@ -124,6 +124,8 @@ def unpublish_impression(impression_id: int, current_user: User = Depends(get_us
                          db: Session = Depends(get_db)):
     impression = get_impression_by_id(db, impression_id)
     check_owner(impression.owner_id, current_user)
+    if impression.is_paid:
+        raise AppError(400, 'Paid impressions cannot be unpublished')
     impression.published = False
     db.commit()
     log_action(db, current_user, 'unpublish_impression',
