@@ -1,4 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 
 from app.database import Base, SessionLocal, engine
@@ -10,11 +14,18 @@ from app.security import get_password_hash
 
 app = FastAPI()
 setup_exception_handlers(app)
+static_dir = Path(__file__).resolve().parent / 'static'
 
 app.include_router(auth.router)
 app.include_router(user.router)
 app.include_router(admin.router)
 app.include_router(impressions.router)
+app.mount('/static', StaticFiles(directory=static_dir), name='static')
+
+
+@app.get('/', include_in_schema=False)
+def frontend():
+    return FileResponse(static_dir / 'index.html')
 
 
 def update_db_schema():

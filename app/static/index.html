@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Travel Impressions</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <div id="toast" class="toast" hidden></div>
+
+    <section id="authView" class="auth-page">
+        <div class="auth-panel">
+            <div>
+                <p class="eyebrow">Travel Impressions</p>
+                <h1>Маршруты и впечатления</h1>
+                <p class="muted">Войдите, чтобы смотреть каталог, сохранять впечатления, покупать платные маршруты и публиковать свой контент.</p>
+            </div>
+
+            <div class="auth-grid">
+                <form id="loginForm" class="panel">
+                    <h2>Вход</h2>
+                    <label>
+                        Email
+                        <input name="email" type="email" autocomplete="email" required>
+                    </label>
+                    <label>
+                        Пароль
+                        <input name="password" type="password" autocomplete="current-password" required>
+                    </label>
+                    <button type="submit">Войти</button>
+                </form>
+
+                <form id="registerForm" class="panel">
+                    <h2>Регистрация</h2>
+                    <label>
+                        Имя
+                        <input name="name" type="text" autocomplete="name" required>
+                    </label>
+                    <label>
+                        Email
+                        <input name="email" type="email" autocomplete="email" required>
+                    </label>
+                    <label>
+                        Пароль
+                        <input name="password" type="password" autocomplete="new-password" minlength="6" required>
+                    </label>
+                    <button type="submit">Создать аккаунт</button>
+                </form>
+            </div>
+        </div>
+    </section>
+
+    <section id="appView" class="app" hidden>
+        <header class="topbar">
+            <div>
+                <p class="eyebrow">Travel Impressions</p>
+                <h1>Рабочая панель</h1>
+            </div>
+            <div class="profile-line">
+                <span id="userBadge" class="badge">Пользователь</span>
+                <button id="logoutButton" class="secondary" type="button">Выйти</button>
+            </div>
+        </header>
+
+        <nav id="tabs" class="tabs"></nav>
+
+        <main id="screen" class="screen"></main>
+    </section>
+
+    <div id="modal" class="modal" hidden>
+        <div class="modal-box">
+            <div class="modal-head">
+                <h2 id="modalTitle"></h2>
+                <button id="modalClose" class="icon-button" type="button">×</button>
+            </div>
+            <div id="modalBody"></div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>
