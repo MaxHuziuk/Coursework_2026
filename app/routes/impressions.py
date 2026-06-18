@@ -23,7 +23,7 @@ def get_impressions(is_paid: bool | None = None, min_cost: float | None = None,
                     max_cost: float | None = None, search: str | None = None,
                     sort_by: str = 'created_at', order: str = 'desc',
                     current_user: User = Depends(get_user), db: Session = Depends(get_db)):
-    return app_response(get_catalog_data(db, is_paid, min_cost, max_cost, search, sort_by, order))
+    return app_response(get_catalog_data(db, is_paid, min_cost, max_cost, search, sort_by, order, current_user.id))
 
 
 @router.post('')

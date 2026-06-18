@@ -3,7 +3,7 @@ from typing import List, Optional
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.models import Impression, RoutePoint
+from app.models import Impression, RoutePoint, SavedImpression
 from app.responses import AppError
 from app.schemas import RoutePointIn
 
@@ -102,9 +102,14 @@ def apply_impression_sort(query, sort_by: str, order: str):
 
 def get_catalog_data(db: Session, is_paid: Optional[bool] = None, min_cost: Optional[float] = None,
                      max_cost: Optional[float] = None, search: Optional[str] = None,
-                     sort_by: str = 'created_at', order: str = 'desc') -> list:
+                     sort_by: str = 'created_at', order: str = 'desc',
+                     user_id: Optional[int] = None) -> list:
     query = db.query(Impression).filter(
         Impression.active == True, Impression.published == True)
+    if user_id is not None:
+        saved = db.query(SavedImpression.impression_id).filter(
+            SavedImpression.user_id == user_id)
+        query = query.filter(Impression.id.notin_(saved))
     query = apply_impression_filters(query, is_paid, min_cost, max_cost, search)
     query = apply_impression_sort(query, sort_by, order)
     impressions = query.all()

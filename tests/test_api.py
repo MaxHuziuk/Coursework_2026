@@ -317,6 +317,21 @@ def test_save_duplicate_and_delete_saved_impression(client):
     assert second_delete.status_code == 404
 
 
+def test_saved_impressions_are_hidden_from_catalog(client):
+    owner = get_headers(client, 'owner@example.com', name='Owner')
+    visitor = get_headers(client, 'visitor@example.com', name='Visitor')
+    first_id = create_impression(client, owner, title='First route')
+    second_id = create_impression(client, owner, title='Second route')
+    client.patch(f'/impressions/{first_id}/publish', headers=owner)
+    client.patch(f'/impressions/{second_id}/publish', headers=owner)
+    client.post(f'/impressions/{first_id}/save', headers=visitor)
+
+    response = client.get('/impressions', headers=visitor)
+
+    assert response.status_code == 200
+    assert [item['id'] for item in response.json()['data']] == [second_id]
+
+
 def test_paid_impression_can_be_bought_once(client):
     owner = get_headers(client, 'owner@example.com', name='Owner')
     buyer = get_headers(client, 'buyer@example.com', name='Buyer')

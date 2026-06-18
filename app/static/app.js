@@ -429,7 +429,6 @@ function card(item, mode) {
             <p class="muted">${html(item.description)}</p>
             <div class="badge-row">
                 ${publicationBadge(item)}
-                <span class="badge">ID ${item.id}</span>
             </div>
             <div class="card-actions">
                 <button class="secondary" type="button" data-action="view" data-id="${item.id}">Открыть</button>
